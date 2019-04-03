@@ -13,8 +13,8 @@ class Sensor
   
   Sensor(short);
   void filter(float);
+  
   private:
-
   void ema_func(float);
   void ema_ema_func();
 };

@@ -1,33 +1,39 @@
 #include "PID.h"
 #include "Sensor.h"
+#include "SoftwareSerial.h"
+#include "Flood.h"
+#include "Stack.h"
 
-#define STBY 4
-#define AIN2 5
-#define AIN1 6
-#define BIN2 7
-#define BIN1 8
-#define LEOB 9
-#define LEOA 10
-#define REOA 11
-#define REOB 12
-#define PWMA A0
-#define PWMB A1
-#define IRBL A2
-#define IRF A3
-#define IRBR A4
-#define IRFR A5
-#define IRFL A6
-#define SPEED 50
+#define STBY 19
+#define AIN2 22
+#define AIN1 23
+#define BIN2 11
+#define BIN1 12
+#define LEOB 6
+#define LEOA 5
+#define REOA 8
+#define REOB 7
+#define PWMA 10
+#define PWMB 9
+#define IRBL A4
+#define IRF A1
+#define IRBR A3
+#define IRFR A2
+#define IRFL A0
+#define SPEED 30
+#define CIRC 3.14159265359*38.5 //from two years ago
+#define TICKSPROT 174 //ticks per rotation (from two years ago)
 
-Sensor front(0,0);
-Sensor fr(0,0);
-Sensor fl(0,0);
-Sensor br(0,0);
-Sensor bl(0,0);
+Sensor front(IRF);
+Sensor fr(IRFR);
+Sensor fl(IRFL);
+Sensor br(IRBR);
+Sensor bl(IRBL);
 
-PID enc(0,0,0);
+PID enc(3.8,0.07,0.3);
 
 volatile int leftCount=0, rightCount=0;
+int prevR=0,prevL=0;
 
 void leftEncoderEvent() 
 {
@@ -79,70 +85,107 @@ void rightEncoderEvent()
       rightCount++;
     }
   }
+
 }
 
-void move()
+float distance()
 {
+  float distR=abs((float)(rightCount-prevR)*CIRC/TICKSPROT);
+  float distL=abs((float)(leftCount-prevL)*CIRC/TICKSPROT);
+  return ((distR+distL)/2)/10;
+}
+
+void moveOne()
+{
+  digitalWrite(STBY,LOW);
   digitalWrite(AIN1,HIGH);
   digitalWrite(AIN2,LOW);
   digitalWrite(BIN1,HIGH);
   digitalWrite(BIN2,LOW);
-  analogWrite(PWMA,SPEED);
-  analogWrite(PWMB,SPEED);
   digitalWrite(STBY,HIGH);
+  while(distance()<15.76)
+  {
+    short error=-leftCount+rightCount;
+    //Serial.printf("%d\n",error);
+    float diff=enc.compute(error);
+    int adjust=SPEED-diff;
+    adjust=constrain(adjust,0,255);
+    analogWrite(PWMB,adjust);
+    delay(10);
+  }
+  digitalWrite(STBY,LOW);
+  prevR=rightCount;
+  prevL=leftCount;
+  delay(500);
 }
 
 void turnCW()
 {
-	digitalWrite(STBY,LOW);
-	digitalWrite(AIN1,HIGH);
-	digitalWrite(AIN2,LOW);
-	digitalWrite(BIN1,LOW);
-	digitalWrite(BIN2,HIGH);
-	long encCount=leftCount;
-	digitalWrite(STBY,HIGH);
-	while(leftCount-encCount<86) //check!!!
-	{
-	}
-	digitalWrite(STBY,LOW);
+  digitalWrite(AIN1,LOW);
+  digitalWrite(AIN2,HIGH);
+  digitalWrite(BIN1,HIGH);
+  digitalWrite(BIN2,LOW);
+  analogWrite(PWMB,SPEED);
+  digitalWrite(STBY,HIGH);
+  rightCount=0;
+  leftCount=0;
+  while(rightCount>-86&&leftCount<86)//double check
+  {
+    //spin
+  }
+  digitalWrite(STBY,LOW);
+  delay(100);
+  rightCount=0;
+  leftCount=0;
+  prevR=0;
+  prevL=0;
+  delay(100);
 }
 
 void turnCCW()
 {
-	digitalWrite(STBY,LOW);
-	digitalWrite(BIN1,HIGH);
-	digitalWrite(BIN2,LOW);
-	digitalWrite(AIN1,LOW);
-	digitalWrite(AIN2,HIGH);
-	long encCount=rightCount;
-	digitalWrite(STBY,HIGH);
-	while(rightCount-encCount<86) //check!!!
-	{
-	}
-	digitalWrite(STBY,LOW);
+	digitalWrite(AIN1,HIGH);
+  digitalWrite(AIN2,LOW);
+  digitalWrite(BIN1,LOW);
+  digitalWrite(BIN2,HIGH);
+  analogWrite(PWMB,SPEED);
+  digitalWrite(STBY,HIGH);
+  rightCount=0;
+  leftCount=0;
+  while(rightCount<84&&leftCount>-84)//double check
+  {
+    //spin
+  }
+  digitalWrite(STBY,LOW);
+  delay(100);
+  rightCount=0;
+  leftCount=0;
+  prevR=0;
+  prevL=0;
+  delay(100);
 }
 
-void stop()
+void halt()
 {
 	digitalWrite(STBY,LOW);
 }
 
 void sense()
 {
-	for(short i=0;i<10;i++)
-	{
-		front.update(analogRead(IRF));
-		fr.update(analogRead(IRFR));
-		fl.update(analogRead(IRFL));
-		br.update(analogRead(IRBR));
-		bl.update(analogRead(IRBL));
-	}
-	
+  for(int i=0;i<10;i++)
+  {
+    front.filter(analogRead(front.pin));
+    fr.filter(analogRead(fr.pin));
+    fl.filter(analogRead(fl.pin));
+    br.filter(analogRead(br.pin));
+    bl.filter(analogRead(bl.pin));
+  }
 }
 
-void IR_Debug()
+void readState()
 {
-	Serial.printf(
+
+
 }
 
 void setup()
@@ -166,16 +209,16 @@ void setup()
   pinMode(IRFL,INPUT);
   attachInterrupt(digitalPinToInterrupt(LEOA),leftEncoderEvent,CHANGE);
   attachInterrupt(digitalPinToInterrupt(REOA),rightEncoderEvent,CHANGE);
-  PID enc(
   Serial.begin(9600);
+  Serial1.begin(115200);
+  digitalWrite(13,HIGH);
+  analogWrite(PWMA,SPEED);
+  analogWrite(PWMB,SPEED);
+  delay(200);
 }
 
 void loop()
 {
-  //Serial.printf("%d, %d\n",leftCount,rightCount);
-  //Serial.printf("%d\n",analogRead(IRFL));
-  digitalWrite(13,HIGH);
-  delay(200);
-  digitalWrite(13,LOW);
-  delay(400);
+
+
 }

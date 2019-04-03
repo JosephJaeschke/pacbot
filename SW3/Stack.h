@@ -1,4 +1,4 @@
-#include "flood.h"
+#include "Flood.h"
 
 class Stack
 {
@@ -15,4 +15,3 @@ class Stack
 	short top;
 	short maxelem;
 };
-

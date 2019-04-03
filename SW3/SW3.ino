@@ -30,7 +30,7 @@ Sensor fl(IRFL);
 Sensor br(IRBR);
 Sensor bl(IRBL);
 
-PID enc(3.8,0.07,0.3);
+PID enc(3.8,0.0,0.0);
 
 volatile int leftCount=0, rightCount=0;
 int prevR=0,prevL=0;
@@ -106,11 +106,11 @@ void moveOne()
   while(distance()<15.76)
   {
     short error=-leftCount+rightCount;
-    //Serial.printf("%d\n",error);
+    Serial1.printf("Error: %d\n",error);
     float diff=enc.compute(error);
-    int adjust=SPEED-diff;
-    adjust=constrain(adjust,0,255);
-    analogWrite(PWMB,adjust);
+    int adjust = SPEED-diff;
+    adjust = constrain(adjust,0,100);
+    analogWrite(PWMB, adjust);
     delay(10);
   }
   digitalWrite(STBY,LOW);
@@ -129,9 +129,9 @@ void turnCW()
   digitalWrite(STBY,HIGH);
   rightCount=0;
   leftCount=0;
-  while(rightCount>-86&&leftCount<86)//double check
+  while(rightCount < 86 && leftCount > -86)//double check
   {
-    //spin
+    Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
   }
   digitalWrite(STBY,LOW);
   delay(100);
@@ -152,9 +152,9 @@ void turnCCW()
   digitalWrite(STBY,HIGH);
   rightCount=0;
   leftCount=0;
-  while(rightCount<84&&leftCount>-84)//double check
+  while(rightCount > -84&&leftCount < 84)//double check
   {
-    //spin
+    Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
   }
   digitalWrite(STBY,LOW);
   delay(100);
@@ -219,6 +219,27 @@ void setup()
 
 void loop()
 {
+  
+  if (Serial1.available() > 0) {
+    char xbeeIn = (char)Serial1.read();
+    Serial.write(xbeeIn);
 
-
+    switch (xbeeIn) {
+      case '1':
+        Serial1.write("Moving Forward");
+        moveOne();
+        Serial1.write("Done \n");
+        break;
+      case '2':
+        Serial1.write("Turning cw");
+        turnCW();
+        Serial1.write("Done \n");
+        break;
+      case '3':
+        Serial1.write("Turning ccw");
+        turnCCW();
+        Serial1.write("Done \n");
+        break;
+    } 
+  }
 }

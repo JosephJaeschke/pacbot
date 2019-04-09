@@ -1,8 +1,9 @@
+#include <Wire.h>
 #include "PID.h"
 #include "Sensor.h"
 #include "SoftwareSerial.h"
 
-#define STBY 19
+#define STBY 20
 #define AIN2 22
 #define AIN1 23
 #define BIN2 11
@@ -13,14 +14,17 @@
 #define REOB 7
 #define PWMA 10
 #define PWMB 9
-#define IRBL A4
+#define IRBL A7
 #define IRF A1
 #define IRBR A3
 #define IRFR A2
 #define IRFL A0
+#define MPU 0x68
 #define SPEED 30
 #define CIRC 3.14159265359*38.5 //from two years ago
 #define TICKSPROT 174 //ticks per rotation (from two years ago)
+
+int16_t AcX=0,AcY=0,AcZ=0,GyX=0,GyY=0,GyZ=0,temperature=0;
 
 Sensor front(IRF);
 Sensor fr(IRFR);
@@ -32,6 +36,14 @@ PID enc(3.8,0.0,0.0);
 
 volatile int leftCount=0, rightCount=0;
 int prevR=0,prevL=0;
+
+char tmp_str[7];
+
+char* convert_int16_to_str(int16_t i)
+{
+  sprintf(tmp_str, "%6d", i);
+  return tmp_str;
+}
 
 void leftEncoderEvent() 
 {
@@ -101,7 +113,7 @@ void moveOne()
   digitalWrite(BIN1,HIGH);
   digitalWrite(BIN2,LOW);
   digitalWrite(STBY,HIGH);
-  while(distance()<15.76)
+  while(distance()<15.8)
   {
     short error=-leftCount+rightCount;
     Serial1.printf("Error: %d\n",error);
@@ -127,7 +139,7 @@ void turnCW()
   digitalWrite(STBY,HIGH);
   rightCount=0;
   leftCount=0;
-  while(rightCount < 86 && leftCount > -86)//double check
+  while(rightCount < 88 && leftCount > -88)//double check
   {
     Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
   }
@@ -150,7 +162,7 @@ void turnCCW()
   digitalWrite(STBY,HIGH);
   rightCount=0;
   leftCount=0;
-  while(rightCount > -84&&leftCount < 84)//double check
+  while(rightCount > -93 &&leftCount < 93)//double check
   {
     Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
   }
@@ -180,10 +192,19 @@ void sense()
   }
 }
 
-void readState()
+void readIMU()
 {
-
-
+  Wire.beginTransmission(MPU);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU,14,true);
+  AcX=(Wire.read()<<8|Wire.read());    
+  AcY=(Wire.read()<<8|Wire.read());  
+  AcZ=Wire.read()<<8|Wire.read();  
+  temperature=Wire.read()<<8|Wire.read();
+  GyX=(Wire.read()<<8|Wire.read());  
+  GyY=(Wire.read()<<8|Wire.read());  
+  GyZ=(Wire.read()<<8|Wire.read());  
 }
 
 void setup()
@@ -209,6 +230,11 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(REOA),rightEncoderEvent,CHANGE);
   Serial.begin(9600);
   Serial1.begin(115200);
+  Wire.begin();
+  Wire.beginTransmission(MPU);
+  Wire.write(0x6B);
+  Wire.write(0);
+  Wire.endTransmission(true);
   digitalWrite(13,HIGH);
   analogWrite(PWMA,SPEED);
   analogWrite(PWMB,SPEED);
@@ -217,12 +243,12 @@ void setup()
 
 void loop()
 {
-  
-  if (Serial1.available() > 0) {
+  if (Serial1.available() > 0)
+  {
     char xbeeIn = (char)Serial1.read();
     Serial.write(xbeeIn);
-
-    switch (xbeeIn) {
+    switch (xbeeIn) 
+    {
       case '1':
         Serial1.write("Moving Forward");
         moveOne();

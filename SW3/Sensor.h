@@ -1,5 +1,5 @@
 #ifndef SENSOR_H
-#define SENDOR_H 
+#define SENSOR_H 
 
 class Sensor
 {
@@ -13,8 +13,8 @@ class Sensor
   
   Sensor(short);
   void filter(float);
-  private:
 
+  private:
   void ema_func(float);
   void ema_ema_func();
 };

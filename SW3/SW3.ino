@@ -1,7 +1,8 @@
 //#include "MPU6050.h"
+//#include "I2Cdev.h"
 //#include "helper_3dmath.h"
+//#include "Wire.h"
 
-#include <Wire.h>
 #include "PID.h"
 #include "Sensor.h"
 #include "SoftwareSerial.h"
@@ -22,6 +23,8 @@
 #define IRBR A3
 #define IRFR A2
 #define IRFL A0
+#define INTERRUPT_PIN 1
+#define OUTPUT_READABLE_EULER
 #define MPU 0x68
 #define SPEED 30
 #define CIRC 3.14159265359*38.5 //from two years ago
@@ -29,6 +32,7 @@
 
 int16_t AcX=0,AcY=0,AcZ=0,GyX=0,GyY=0,GyZ=0,temperature=0;
 
+// IR Sensor Initalization
 Sensor front(IRF);
 Sensor fr(IRFR);
 Sensor fl(IRFL);
@@ -39,13 +43,60 @@ float frontSense = 0;
 float leftSense = 0;
 float rightSense = 0;
 
+//encoder and wall PID Initalization
 PID enc(3.8,0.0,0.0);
 PID wall(.5, 0, 0);
 
+//encoder count variables
 volatile int leftCount=0, rightCount=0;
 int prevR=0,prevL=0;
 
+//Initalize the mpu to 0x68
+//MPU6050 mpu;
+
+bool blinkState = false;
+
+// MPU control/status vars
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+/*
+// orientation/motion vars
+Quaternion q;           // [w, x, y, z]         quaternion container
+VectorInt16 aa;         // [x, y, z]            accel sensor measurements
+VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
+VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
+VectorFloat gravity;    // [x, y, z]            gravity vector
+float euler[3];         // [psi, theta, phi]    Euler angle container
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+
+*/
 char tmp_str[7];
+
+// Create different states for robot
+
+enum states {
+  IDLE, //Waits for its next movement state
+  MOVE_FORWARD, //Move forward one block and switch back to idle
+  ROTATE_CW,  //Rotate 90 degrees Clockwise
+  ROTATE_CCW  //Rotate 90 degrees Counter Clock Wise
+};
+
+enum states robotState = IDLE;
+
+enum moveForwardStates {
+  INITALIZE,  //Set motor speeds and start moving
+  FORWARD,  //Move robot forward fixed distance or until it sees a wall
+  FORWARD_CENTER, //After moving forward, if a wall is in front of the robot and it is too far backward, it moves to the center of the block
+  FINALIZE //Stop all motors and reset values
+  
+};
+
+enum moveForwardStates forwardState = INITALIZE;
 
 char* convert_int16_to_str(int16_t i)
 {
@@ -53,6 +104,7 @@ char* convert_int16_to_str(int16_t i)
   return tmp_str;
 }
 
+//Interrupt events for encoders
 void leftEncoderEvent() 
 {
   if(digitalRead(LEOA)==HIGH)
@@ -106,6 +158,7 @@ void rightEncoderEvent()
 
 }
 
+// Distance Converter from encoders to cm
 float distance()
 {
   float distR=abs((float)(rightCount-prevR)*CIRC/TICKSPROT);
@@ -113,81 +166,98 @@ float distance()
   return ((distR+distL)/2)/10;
 }
 
+// Move robot forward one block
 void moveOne()
 {
-  digitalWrite(STBY,LOW);
-  digitalWrite(AIN1,HIGH);
-  digitalWrite(AIN2,LOW);
-  digitalWrite(BIN1,HIGH);
-  digitalWrite(BIN2,LOW);
-  digitalWrite(STBY,HIGH);
-  
-  while(distance()<15.8)
+  switch (forwardState)
   {
-    short encError=-leftCount+rightCount;
-    float encDiff=enc.compute(encError);
+    case INITALIZE:
+        // Set motors to move forward
+        digitalWrite(STBY,LOW);
+        digitalWrite(AIN1,HIGH);
+        digitalWrite(AIN2,LOW);
+        digitalWrite(BIN1,HIGH);
+        digitalWrite(BIN2,LOW);
+        digitalWrite(STBY,HIGH);
 
-    float wallError = -leftSense + rightSense;
-    float wallDiff = wall.compute(wallError);
+        forwardState = FORWARD;
+        
+      break;
+
+    // drive forward based on encoders and walls
+    case FORWARD:
+        // Check if robot has traveled one blocks length, or is not in middle of a block based on front sensor
+        if (distance() < 15.8 || frontSense < 260) {
+          // Calculate encoder and wall error
+          short encError=-leftCount+rightCount;
+          float encDiff=enc.compute(encError);
+
+          float wallDiff = 0;
+          
+          // Check if there are valid walls to center on
+          if (leftSense > 170 && rightSense > 170) {
+            float wallError = -leftSense + rightSense;
+            wallDiff = wall.compute(wallError);
+          }
+      
+          int adjust = SPEED - encDiff - wallDiff;
+          adjust = constrain(adjust,0,100);
+          analogWrite(PWMB, adjust);
+        }
+        //Traveled one block distance
+        else if (distance() >= 15.8) {
+          //Check if there is a wall in front of robot to center on
+          if (frontSense > 140) {
+            forwardState = FORWARD_CENTER;
+          } else {
+            forwardState = FINALIZE;
+          }
+        }
+        // If the robot stopped because of a wall, or there is no wall
+        else {
+          forwardState = FINALIZE;
+        }
+
+      break;
+      
+    case FORWARD_CENTER:
+      // While the robot is not in the center of box based on front wall, move forward
+      if (frontSense < 260) {
+        short encError=-leftCount+rightCount;
+        float encDiff=enc.compute(encError);
+
+        float wallDiff = 0;
+        // Check if there are valid walls to center on
+        if (leftSense > 170 && rightSense > 170) {
+          float wallError = -leftSense + rightSense;
+          wallDiff = wall.compute(wallError);
+        }
     
-    int adjust = SPEED - encDiff - wallDiff;
-    adjust = constrain(adjust,0,100);
-    analogWrite(PWMB, adjust);
-    delay(10);
-  }
-  digitalWrite(STBY,LOW);
-  prevR=rightCount;
-  prevL=leftCount;
-  delay(500);
+        int adjust = SPEED - encDiff - wallDiff;
+        
+        adjust = constrain(adjust,0,100);
+        analogWrite(PWMB, adjust);
+      } else {
+        forwardState = FINALIZE;
+      }
+      break;
 
-  sense();
-  
-  if (frontSense > 260) {
+    case FINALIZE:
+      digitalWrite(STBY,LOW);
+      prevR=rightCount;
+      prevL=leftCount;
 
-    Serial1.write("Centering Backward");
+      // Set states of robot since moving forward is done
+      robotState = IDLE;
+      forwardState = INITALIZE;
 
-    
-    digitalWrite(AIN1,LOW);
-    digitalWrite(AIN2,HIGH);
-    digitalWrite(BIN1,LOW);
-    digitalWrite(BIN2,HIGH);
-    digitalWrite(STBY,HIGH);
-    analogWrite(PWMB, SPEED);
-
-    
-    while (frontSense > 300) {
-    Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
-
-    delay(10);
-    sense();
-    }
-  }
-   else if (frontSense > 140) {
-    digitalWrite(STBY,HIGH);
-
-    Serial1.write("Centering Forward");
-    
-    while (frontSense < 260) {
-
-    Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
-
-    
-    short encError=-leftCount+rightCount;
-    float encDiff=enc.compute(encError);
-    int adjust = SPEED - encDiff;
-    adjust = constrain(adjust,0,100);
-    analogWrite(PWMB, adjust);
-    delay(10);
-    sense();
-    }
-  }
-  
-
-  digitalWrite(STBY,LOW);
-  prevR=rightCount;
-  prevL=leftCount;
-  delay(500);
+      //Delay commented out since I dont know what its for
+      //delay(50);
+      
+      break;
+  }  
 }
+
 
 void turnCW()
 {
@@ -255,16 +325,10 @@ void sense()
   rightSense = (fr.DEMA + br.DEMA)/2.0f;
 }
 
+/*
 void setSpace(short row,short col)
 {
-  int i;
-  for(i=0;i<10;i++)
-  {
-    front.sett(analogRead(front.pin));
-    left.sett(analogRead(left.pin));
-    right.sett(analogRead(right.pin));
-    delay(10);
-  }
+  sense();
   bool fwall=false;
   bool rwall=false;
   bool lwall=false;
@@ -349,7 +413,9 @@ void setSpace(short row,short col)
    use_enc=false;
   }
 }
+*/
 
+/*
 void readIMU()
 {
   Wire.beginTransmission(MPU);
@@ -364,6 +430,13 @@ void readIMU()
   GyY=(Wire.read()<<8|Wire.read());  
   GyZ=(Wire.read()<<8|Wire.read());  
 }
+
+
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+void dmpDataReady() {
+    mpuInterrupt = true;
+}
+*/
 
 void setup()
 {
@@ -388,11 +461,25 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(REOA),rightEncoderEvent,CHANGE);
   Serial.begin(9600);
   Serial1.begin(115200);
+  /*
   Wire.begin();
   Wire.beginTransmission(MPU);
   Wire.write(0x6B);
   Wire.write(0);
   Wire.endTransmission(true);
+  
+  Wire.begin();
+  Wire.setSDA(30);
+  Wire.setSCL(29);
+  Wire.setClock(400000);
+  mpu.initialize();
+  pinMode(INTERRUPT_PIN, INPUT);
+  // verify connection
+    Serial1.println(F("Testing device connections..."));
+    Serial1.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
+
+  */
+  
   digitalWrite(13,HIGH);
   analogWrite(PWMA,SPEED);
   analogWrite(PWMB,SPEED);
@@ -409,23 +496,39 @@ void loop()
     {
       case '1':
         Serial1.write("Moving Forward");
-        moveOne();
-        Serial1.write("Done \n");
+        robotState = MOVE_FORWARD;
         break;
       case '2':
         Serial1.write("Turning cw");
-        turnCW();
-        Serial1.write("Done \n");
+        robotState = ROTATE_CW;
         break;
       case '3':
         Serial1.write("Turning ccw");
-        turnCCW();
-        Serial1.write("Done \n");
+        robotState = ROTATE_CCW;
         break;
     } 
   }
-  //delay(100);
+  
+  switch (robotState)
+  {
+    case MOVE_FORWARD:
+      moveOne();
+      break;
+    case ROTATE_CW:
+      turnCW();
+      break;
+    case ROTATE_CCW:
+      turnCCW();
+      break;
+    case IDLE:
+      break;
+  }
+
+  // Always update the ir sensors every cycle
   sense();
-  //Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
+
+  //Debug output
+  
+  Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
   
 }

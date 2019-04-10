@@ -255,6 +255,101 @@ void sense()
   rightSense = (fr.DEMA + br.DEMA)/2.0f;
 }
 
+void setSpace(short row,short col)
+{
+  int i;
+  for(i=0;i<10;i++)
+  {
+    front.sett(analogRead(front.pin));
+    left.sett(analogRead(left.pin));
+    right.sett(analogRead(right.pin));
+    delay(10);
+  }
+  bool fwall=false;
+  bool rwall=false;
+  bool lwall=false;
+  if(front.DEMA>front.thresholdd)
+  {
+    fwall=true;
+  }
+  if(left.DEMA>left.thresholdd)
+  {
+    lwall=true;
+  }
+  if(right.DEMA>right.thresholdd)
+  {
+    rwall=true;
+  }
+  if(fwall&&grid[row][col].visited==0)
+  {
+    if(facing=='u')
+    {
+      grid[row][col].up=1;
+    }
+    else if(facing=='r')
+    {
+      grid[row][col].right=1;
+    }
+    else if(facing=='d')
+    {
+      grid[row][col].down=1;
+    }
+    else
+    {
+      grid[row][col].left=1;
+    }
+  }
+  if(lwall&&grid[row][col].visited==0)
+  {
+    if(facing=='u')
+    {
+      grid[row][col].left=1;
+    }
+    else if(facing=='r')
+    {
+      grid[row][col].up=1;   
+    }
+    else if(facing=='d')
+    {
+      grid[row][col].right=1;
+    }
+    else
+    {
+      grid[row][col].down=1;
+    }
+  }
+  if(rwall&&grid[row][col].visited==0)
+  {
+    if(facing=='u')
+    {
+      grid[row][col].right=1;
+    }
+    else if(facing=='r')
+    {
+      grid[row][col].down=1;
+    }
+    else if(facing=='d')
+    {
+      grid[row][col].left=1;
+    }
+    else
+    {
+      grid[row][col].up=1;
+    }
+    delay(1000);
+  }
+  use_enc=true;
+  if(rwall&&lwall)
+  {
+   short error=left.DEMA-right.DEMA;
+   float diff=irPID.compute(error);
+   int adjust=SPEED-diff;
+   adjust=constrain(adjust,0,255);
+   analogWrite(PWMB,adjust);
+   use_enc=false;
+  }
+}
+
 void readIMU()
 {
   Wire.beginTransmission(MPU);

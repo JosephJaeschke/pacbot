@@ -1,3 +1,6 @@
+//#include "MPU6050.h"
+//#include "helper_3dmath.h"
+
 #include <Wire.h>
 #include "PID.h"
 #include "Sensor.h"
@@ -32,7 +35,12 @@ Sensor fl(IRFL);
 Sensor br(IRBR);
 Sensor bl(IRBL);
 
+float frontSense = 0;
+float leftSense = 0;
+float rightSense = 0;
+
 PID enc(3.8,0.0,0.0);
+PID wall(.5, 0, 0);
 
 volatile int leftCount=0, rightCount=0;
 int prevR=0,prevL=0;
@@ -113,16 +121,68 @@ void moveOne()
   digitalWrite(BIN1,HIGH);
   digitalWrite(BIN2,LOW);
   digitalWrite(STBY,HIGH);
+  
   while(distance()<15.8)
   {
-    short error=-leftCount+rightCount;
-    Serial1.printf("Error: %d\n",error);
-    float diff=enc.compute(error);
-    int adjust = SPEED-diff;
+    short encError=-leftCount+rightCount;
+    float encDiff=enc.compute(encError);
+
+    float wallError = -leftSense + rightSense;
+    float wallDiff = wall.compute(wallError);
+    
+    int adjust = SPEED - encDiff - wallDiff;
     adjust = constrain(adjust,0,100);
     analogWrite(PWMB, adjust);
     delay(10);
   }
+  digitalWrite(STBY,LOW);
+  prevR=rightCount;
+  prevL=leftCount;
+  delay(500);
+
+  sense();
+  
+  if (frontSense > 260) {
+
+    Serial1.write("Centering Backward");
+
+    
+    digitalWrite(AIN1,LOW);
+    digitalWrite(AIN2,HIGH);
+    digitalWrite(BIN1,LOW);
+    digitalWrite(BIN2,HIGH);
+    digitalWrite(STBY,HIGH);
+    analogWrite(PWMB, SPEED);
+
+    
+    while (frontSense > 300) {
+    Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
+
+    delay(10);
+    sense();
+    }
+  }
+   else if (frontSense > 140) {
+    digitalWrite(STBY,HIGH);
+
+    Serial1.write("Centering Forward");
+    
+    while (frontSense < 260) {
+
+    Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
+
+    
+    short encError=-leftCount+rightCount;
+    float encDiff=enc.compute(encError);
+    int adjust = SPEED - encDiff;
+    adjust = constrain(adjust,0,100);
+    analogWrite(PWMB, adjust);
+    delay(10);
+    sense();
+    }
+  }
+  
+
   digitalWrite(STBY,LOW);
   prevR=rightCount;
   prevL=leftCount;
@@ -182,7 +242,7 @@ void halt()
 
 void sense()
 {
-  for(int i=0;i<10;i++)
+  for(int i=0;i<5;i++)
   {
     front.filter(analogRead(front.pin));
     fr.filter(analogRead(fr.pin));
@@ -190,6 +250,9 @@ void sense()
     br.filter(analogRead(br.pin));
     bl.filter(analogRead(bl.pin));
   }
+  frontSense = front.DEMA;
+  leftSense = (fl.DEMA+bl.DEMA)/2.0f;
+  rightSense = (fr.DEMA + br.DEMA)/2.0f;
 }
 
 void readIMU()
@@ -266,4 +329,8 @@ void loop()
         break;
     } 
   }
+  //delay(100);
+  sense();
+  //Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
+  
 }

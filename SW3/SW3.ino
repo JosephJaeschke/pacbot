@@ -1,7 +1,7 @@
-//#include "MPU6050.h"
-//#include "I2Cdev.h"
-//#include "helper_3dmath.h"
-//#include "Wire.h"
+#include "MPU6050_6Axis_MotionApps20.h"
+#include "I2Cdev.h"
+#include "helper_3dmath.h"
+#include "Wire.h"
 
 #include "PID.h"
 #include "Sensor.h"
@@ -24,7 +24,6 @@
 #define IRFR A2
 #define IRFL A0
 #define INTERRUPT_PIN 1
-#define OUTPUT_READABLE_EULER
 #define MPU 0x68
 #define SPEED 30
 #define CIRC 3.14159265359*38.5 //from two years ago
@@ -52,7 +51,7 @@ volatile int leftCount=0, rightCount=0;
 int prevR=0,prevL=0;
 
 //Initalize the mpu to 0x68
-//MPU6050 mpu;
+MPU6050 mpu;
 
 bool blinkState = false;
 
@@ -64,18 +63,10 @@ uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
 uint16_t fifoCount;     // count of all bytes currently in FIFO
 uint8_t fifoBuffer[64]; // FIFO storage buffer
 
-/*
+
 // orientation/motion vars
 Quaternion q;           // [w, x, y, z]         quaternion container
-VectorInt16 aa;         // [x, y, z]            accel sensor measurements
-VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
-VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
-VectorFloat gravity;    // [x, y, z]            gravity vector
 float euler[3];         // [psi, theta, phi]    Euler angle container
-float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
-
-*/
-char tmp_str[7];
 
 // Create different states for robot
 
@@ -97,12 +88,6 @@ enum moveForwardStates {
 };
 
 enum moveForwardStates forwardState = INITALIZE;
-
-char* convert_int16_to_str(int16_t i)
-{
-  sprintf(tmp_str, "%6d", i);
-  return tmp_str;
-}
 
 //Interrupt events for encoders
 void leftEncoderEvent() 
@@ -415,28 +400,52 @@ void setSpace(short row,short col)
 }
 */
 
-/*
-void readIMU()
-{
-  Wire.beginTransmission(MPU);
-  Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU,14,true);
-  AcX=(Wire.read()<<8|Wire.read());    
-  AcY=(Wire.read()<<8|Wire.read());  
-  AcZ=Wire.read()<<8|Wire.read();  
-  temperature=Wire.read()<<8|Wire.read();
-  GyX=(Wire.read()<<8|Wire.read());  
-  GyY=(Wire.read()<<8|Wire.read());  
-  GyZ=(Wire.read()<<8|Wire.read());  
-}
-
 
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
     mpuInterrupt = true;
 }
-*/
+
+void readMPU6050() {
+  if (mpuInterrupt && mpu.getFIFOCount() < packetSize) {
+
+    // reset interrupt flag and get INT_STATUS byte
+    mpuInterrupt = false;
+    mpuIntStatus = mpu.getIntStatus();
+
+    // get current FIFO count
+    fifoCount = mpu.getFIFOCount();
+
+    // check for overflow (this should never happen unless our code is too inefficient)
+    if ((mpuIntStatus & _BV(MPU6050_INTERRUPT_FIFO_OFLOW_BIT)) || fifoCount >= 1024) {
+        // reset so we can continue cleanly
+        mpu.resetFIFO();
+        fifoCount = mpu.getFIFOCount();
+        Serial.println(F("FIFO overflow!"));
+
+    // otherwise, check for DMP data ready interrupt (this should happen frequently)
+    } else if (mpuIntStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT)) {
+      // wait for correct available data length, should be a VERY short wait
+      while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+
+      // read a packet from FIFO
+      mpu.getFIFOBytes(fifoBuffer, packetSize);
+      
+      // track FIFO count here in case there is > 1 packet available
+      // (this lets us immediately read more without waiting for an interrupt)
+      fifoCount -= packetSize;
+      // display Euler angles in degrees
+      mpu.dmpGetQuaternion(&q, fifoBuffer);
+      mpu.dmpGetEuler(euler, &q);
+      Serial.print("euler\t");
+      Serial.print(euler[0] * 180/M_PI);
+      Serial.print("\t");
+      Serial.print(euler[1] * 180/M_PI);
+      Serial.print("\t");
+      Serial.println(euler[2] * 180/M_PI);
+    }
+  }
+}
 
 void setup()
 {
@@ -461,7 +470,7 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(REOA),rightEncoderEvent,CHANGE);
   Serial.begin(9600);
   Serial1.begin(115200);
-  /*
+  
   Wire.begin();
   Wire.beginTransmission(MPU);
   Wire.write(0x6B);
@@ -475,10 +484,20 @@ void setup()
   mpu.initialize();
   pinMode(INTERRUPT_PIN, INPUT);
   // verify connection
-    Serial1.println(F("Testing device connections..."));
-    Serial1.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
-
-  */
+  Serial1.println(F("Testing device connections..."));
+  Serial1.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
+  devStatus = mpu.dmpInitialize();
+  // supply your own gyro offsets here, scaled for min sensitivity
+  mpu.setXGyroOffset(220);
+  mpu.setYGyroOffset(76);
+  mpu.setZGyroOffset(-85);
+  mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+        
+  mpu.setDMPEnabled(true);
+  
+  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
+  mpuIntStatus = mpu.getIntStatus();
+  packetSize = mpu.dmpGetFIFOPacketSize();
   
   digitalWrite(13,HIGH);
   analogWrite(PWMA,SPEED);
@@ -527,6 +546,8 @@ void loop()
   // Always update the ir sensors every cycle
   sense();
 
+  // Read MPU6050 Sensor
+  readMPU6050();
   //Debug output
   
   Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);

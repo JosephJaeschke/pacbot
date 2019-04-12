@@ -29,7 +29,7 @@
 #define CIRC 3.14159265359*38.5 //from two years ago
 #define TICKSPROT 174 //ticks per rotation (from two years ago)
 
-int16_t AcX=0,AcY=0,AcZ=0,GyX=0,GyY=0,GyZ=0,temperature=0;
+bool debug = true;
 
 // IR Sensor Initalization
 Sensor front(IRF);
@@ -72,8 +72,9 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 enum states {
   IDLE, //Waits for its next movement state
   MOVE_FORWARD, //Move forward one block and switch back to idle
-  ROTATE_CW,  //Rotate 90 degrees Clockwise
-  ROTATE_CCW  //Rotate 90 degrees Counter Clock Wise
+  ROTATE_CW_FORWARD,  //Rotate 90 degrees Clockwise
+  ROTATE_CCW_FORWARD,  //Rotate 90 degrees Counter Clock Wise
+  TURN_FORWARD  //Rotate 180 degrees and go forward
 };
 
 enum states robotState = IDLE;
@@ -156,6 +157,7 @@ void moveOne()
   switch (forwardState)
   {
     case INITALIZE:
+        if(debug) Serial1.printf("Initalize\n");
         // Set motors to move forward
         digitalWrite(STBY,LOW);
         digitalWrite(AIN1,HIGH);
@@ -170,8 +172,10 @@ void moveOne()
 
     // drive forward based on encoders and walls
     case FORWARD:
+         if(debug) Serial1.printf("Forward\n");
+
         // Check if robot has traveled one blocks length, or is not in middle of a block based on front sensor
-        if (distance() < 15.8 || frontSense < 260) {
+        if (distance() < 15.8 && frontSense < 260) {
           // Calculate encoder and wall error
           short encError=-leftCount+rightCount;
           double encDiff=enc.compute(encError);
@@ -205,6 +209,8 @@ void moveOne()
       break;
       
     case FORWARD_CENTER:
+       if(debug) Serial1.printf("Forward Center\n");
+
       // While the robot is not in the center of box based on front wall, move forward
       if (frontSense < 260) {
         short encError=-leftCount+rightCount;
@@ -227,6 +233,8 @@ void moveOne()
       break;
 
     case FINALIZE:
+      if(debug) Serial1.printf("Finalize\n");
+
       digitalWrite(STBY,LOW);
       prevR=rightCount;
       prevL=leftCount;
@@ -255,7 +263,7 @@ void turnCW()
   leftCount=0;
   while(rightCount < 88 && leftCount > -88)//double check
   {
-    Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
+    //Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
   }
   digitalWrite(STBY,LOW);
   delay(100);
@@ -263,6 +271,7 @@ void turnCW()
   leftCount=0;
   prevR=0;
   prevL=0;
+  robotState = IDLE;
   delay(100);
 }
 
@@ -278,7 +287,7 @@ void turnCCW()
   leftCount=0;
   while(rightCount > -93 &&leftCount < 93)//double check
   {
-    Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
+    //Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
   }
   digitalWrite(STBY,LOW);
   delay(100);
@@ -286,6 +295,31 @@ void turnCCW()
   leftCount=0;
   prevR=0;
   prevL=0;
+  robotState = IDLE;
+  delay(100);
+}
+
+void turnAround()
+{
+  digitalWrite(AIN1,HIGH);
+  digitalWrite(AIN2,LOW);
+  digitalWrite(BIN1,LOW);
+  digitalWrite(BIN2,HIGH);
+  analogWrite(PWMB,SPEED);
+  digitalWrite(STBY,HIGH);
+  rightCount=0;
+  leftCount=0;
+  while(rightCount > -186 &&leftCount < 186)//double check
+  {
+    //Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
+  }
+  digitalWrite(STBY,LOW);
+  delay(100);
+  rightCount=0;
+  leftCount=0;
+  prevR=0;
+  prevL=0;
+  robotState = IDLE;
   delay(100);
 }
 
@@ -477,8 +511,8 @@ void setup()
   mpu.initialize();
   pinMode(INTERRUPT_PIN, INPUT);
   // verify connection
-  Serial1.println(F("Testing device connections..."));
-  Serial1.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
+  //Serial1.println(F("Testing device connections..."));
+  //Serial1.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
   devStatus = mpu.dmpInitialize();
   
   // supply your own gyro offsets here, scaled for min sensitivity
@@ -517,11 +551,15 @@ void loop()
         break;
       case '2':
         Serial1.write("Turning cw");
-        robotState = ROTATE_CW;
+        robotState = ROTATE_CW_FORWARD;
         break;
       case '3':
         Serial1.write("Turning ccw");
-        robotState = ROTATE_CCW;
+        robotState = ROTATE_CCW_FORWARD;
+        break;
+      case'4':
+        Serial1.write("Rotate 180 and forward");
+        robotState = TURN_FORWARD;
         break;
     } 
   }
@@ -531,12 +569,14 @@ void loop()
     case MOVE_FORWARD:
       moveOne();
       break;
-    case ROTATE_CW:
+    case ROTATE_CW_FORWARD:
       turnCW();
       break;
-    case ROTATE_CCW:
+    case ROTATE_CCW_FORWARD:
       turnCCW();
       break;
+    case TURN_FORWARD:
+      turnAround();
     case IDLE:
       break;
   }

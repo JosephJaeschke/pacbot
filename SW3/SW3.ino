@@ -1,7 +1,7 @@
-//#include "MPU6050_6Axis_MotionApps20.h"
-//#include "I2Cdev.h"
-//#include "helper_3dmath.h"
-//#include "Wire.h"
+#include "MPU6050_6Axis_MotionApps20.h"
+#include "I2Cdev.h"
+#include "helper_3dmath.h"
+#include "Wire.h"
 
 #include "PID.h"
 #include "Sensor.h"
@@ -38,9 +38,9 @@ Sensor fl(IRFL);
 Sensor br(IRBR);
 Sensor bl(IRBL);
 
-float frontSense = 0;
-float leftSense = 0;
-float rightSense = 0;
+double frontSense = 0;
+double leftSense = 0;
+double rightSense = 0;
 
 //encoder and wall PID Initalization
 PID enc(3.8,0.0,0.0);
@@ -50,23 +50,22 @@ PID wall(.5, 0, 0);
 volatile int leftCount=0, rightCount=0;
 int prevR=0,prevL=0;
 
-////Initalize the mpu to 0x68
-//MPU6050 mpu;
-//
-//bool blinkState = false;
-//
-//// MPU control/status vars
-//bool dmpReady = false;  // set true if DMP init was successful
-//uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-//uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
-//uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
-//uint16_t fifoCount;     // count of all bytes currently in FIFO
-//uint8_t fifoBuffer[64]; // FIFO storage buffer
-//
-//
-//// orientation/motion vars
-//Quaternion q;           // [w, x, y, z]         quaternion container
-//float euler[3];         // [psi, theta, phi]    Euler angle container
+//Initalize the mpu to 0x68
+MPU6050 mpu;
+
+bool blinkState = false;
+
+// MPU control/status vars
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+// orientation/motion vars
+Quaternion q;           // [w, x, y, z]         quaternion container
+float euler[3];         // [psi, theta, phi]    Euler angle container
 
 // Create different states for robot
 
@@ -144,10 +143,10 @@ void rightEncoderEvent()
 }
 
 // Distance Converter from encoders to cm
-float distance()
+double distance()
 {
-  float distR=abs((float)(rightCount-prevR)*CIRC/TICKSPROT);
-  float distL=abs((float)(leftCount-prevL)*CIRC/TICKSPROT);
+  double distR=abs((double)(rightCount-prevR)*CIRC/TICKSPROT);
+  double distL=abs((double)(leftCount-prevL)*CIRC/TICKSPROT);
   return ((distR+distL)/2)/10;
 }
 
@@ -175,13 +174,13 @@ void moveOne()
         if (distance() < 15.8 || frontSense < 260) {
           // Calculate encoder and wall error
           short encError=-leftCount+rightCount;
-          float encDiff=enc.compute(encError);
+          double encDiff=enc.compute(encError);
 
-          float wallDiff = 0;
+          double wallDiff = 0;
           
           // Check if there are valid walls to center on
           if (leftSense > 170 && rightSense > 170) {
-            float wallError = -leftSense + rightSense;
+            double wallError = -leftSense + rightSense;
             wallDiff = wall.compute(wallError);
           }
       
@@ -209,12 +208,12 @@ void moveOne()
       // While the robot is not in the center of box based on front wall, move forward
       if (frontSense < 260) {
         short encError=-leftCount+rightCount;
-        float encDiff=enc.compute(encError);
+        double encDiff=enc.compute(encError);
 
-        float wallDiff = 0;
+        double wallDiff = 0;
         // Check if there are valid walls to center on
         if (leftSense > 170 && rightSense > 170) {
-          float wallError = -leftSense + rightSense;
+          double wallError = -leftSense + rightSense;
           wallDiff = wall.compute(wallError);
         }
     
@@ -391,7 +390,7 @@ void setSpace(short row,short col)
   if(rwall&&lwall)
   {
    short error=left.DEMA-right.DEMA;
-   float diff=irPID.compute(error);
+   double diff=irPID.compute(error);
    int adjust=SPEED-diff;
    adjust=constrain(adjust,0,255);
    analogWrite(PWMB,adjust);
@@ -401,54 +400,56 @@ void setSpace(short row,short col)
 */
 
 
-//volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
-//void dmpDataReady() {
-//    mpuInterrupt = true;
-//}
-//
-//void readMPU6050() {
-//  if (mpuInterrupt && mpu.getFIFOCount() < packetSize) {
-//
-//    // reset interrupt flag and get INT_STATUS byte
-//    mpuInterrupt = false;
-//    mpuIntStatus = mpu.getIntStatus();
-//
-//    // get current FIFO count
-//    fifoCount = mpu.getFIFOCount();
-//
-//    // check for overflow (this should never happen unless our code is too inefficient)
-//    if ((mpuIntStatus & _BV(MPU6050_INTERRUPT_FIFO_OFLOW_BIT)) || fifoCount >= 1024) {
-//        // reset so we can continue cleanly
-//        mpu.resetFIFO();
-//        fifoCount = mpu.getFIFOCount();
-//        Serial.println(F("FIFO overflow!"));
-//
-//    // otherwise, check for DMP data ready interrupt (this should happen frequently)
-//    } else if (mpuIntStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT)) {
-//      // wait for correct available data length, should be a VERY short wait
-//      while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
-//
-//      // read a packet from FIFO
-//      mpu.getFIFOBytes(fifoBuffer, packetSize);
-//      
-//      // track FIFO count here in case there is > 1 packet available
-//      // (this lets us immediately read more without waiting for an interrupt)
-//      fifoCount -= packetSize;
-//      // display Euler angles in degrees
-//      mpu.dmpGetQuaternion(&q, fifoBuffer);
-//      mpu.dmpGetEuler(euler, &q);
-//      Serial.print("euler\t");
-//      Serial.print(euler[0] * 180/M_PI);
-//      Serial.print("\t");
-//      Serial.print(euler[1] * 180/M_PI);
-//      Serial.print("\t");
-//      Serial.println(euler[2] * 180/M_PI);
-//    }
-//  }
-//}
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+void dmpDataReady() {
+    mpuInterrupt = true;
+}
+
+void readMPU6050() {
+  if (mpuInterrupt && mpu.getFIFOCount() < packetSize) {
+
+    // reset interrupt flag and get INT_STATUS byte
+    mpuInterrupt = false;
+    mpuIntStatus = mpu.getIntStatus();
+
+    // get current FIFO count
+    fifoCount = mpu.getFIFOCount();
+
+    // check for overflow (this should never happen unless our code is too inefficient)
+    if ((mpuIntStatus & _BV(MPU6050_INTERRUPT_FIFO_OFLOW_BIT)) || fifoCount >= 1024) {
+        // reset so we can continue cleanly
+        mpu.resetFIFO();
+        fifoCount = mpu.getFIFOCount();
+        Serial.println(F("FIFO overflow!"));
+
+    // otherwise, check for DMP data ready interrupt (this should happen frequently)
+    } else if (mpuIntStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT)) {
+      // wait for correct available data length, should be a VERY short wait
+      while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+
+      // read a packet from FIFO
+      mpu.getFIFOBytes(fifoBuffer, packetSize);
+      
+      // track FIFO count here in case there is > 1 packet available
+      // (this lets us immediately read more without waiting for an interrupt)
+      fifoCount -= packetSize;
+      // display Euler angles in degrees
+      mpu.dmpGetQuaternion(&q, fifoBuffer);
+      mpu.dmpGetEuler(euler, &q);
+      Serial.print("euler\t");
+      Serial.print(euler[0] * 180/M_PI);
+      Serial.print("\t");
+      Serial.print(euler[1] * 180/M_PI);
+      Serial.print("\t");
+      Serial.println(euler[2] * 180/M_PI);
+    }
+  }
+}
 
 void setup()
 {
+  Serial.begin(57600);
+  Serial1.begin(115200);
   pinMode(13,OUTPUT);
   pinMode(STBY,OUTPUT);
   pinMode(AIN2,OUTPUT);
@@ -468,9 +469,7 @@ void setup()
   pinMode(IRFL,INPUT);
   attachInterrupt(digitalPinToInterrupt(LEOA),leftEncoderEvent,CHANGE);
   attachInterrupt(digitalPinToInterrupt(REOA),rightEncoderEvent,CHANGE);
-  Serial.begin(9600);
-  Serial1.begin(115200);
-  /*
+  
   Wire.begin();
   Wire.setSDA(30);
   Wire.setSCL(29);
@@ -492,16 +491,19 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
   mpuIntStatus = mpu.getIntStatus();
   packetSize = mpu.dmpGetFIFOPacketSize();
-  */
+  
   digitalWrite(13,HIGH);
   analogWrite(PWMA,SPEED);
   analogWrite(PWMB,SPEED);
   delay(200);
+  
 }
 
+float printTime = 0;
 void loop()
 {
-  /*if (Serial1.available() > 0)
+  
+  if (Serial1.available() > 0)
   {
     char xbeeIn = (char)Serial1.read();
     Serial.write(xbeeIn);
@@ -536,15 +538,14 @@ void loop()
     case IDLE:
       break;
   }
-  */
+  
   // Always update the ir sensors every cycle
   sense();
 
   // Read MPU6050 Sensor
-  //readMPU6050();
+  readMPU6050();
+  
   //Debug output
-  
   Serial.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
-  delay(50);
-  
+  delay(20);
 }

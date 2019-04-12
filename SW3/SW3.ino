@@ -23,7 +23,7 @@
 #define IRBR A3
 #define IRFR A2
 #define IRFL A0
-#define INTERRUPT_PIN 1
+#define INTERRUPT_PIN 4
 #define MPU 0x68
 #define SPEED 30
 #define CIRC 3.14159265359*38.5 //from two years ago
@@ -56,7 +56,6 @@ MPU6050 mpu;
 bool blinkState = false;
 
 // MPU control/status vars
-bool dmpReady = false;  // set true if DMP init was successful
 uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
 uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
@@ -65,7 +64,8 @@ uint8_t fifoBuffer[64]; // FIFO storage buffer
 
 // orientation/motion vars
 Quaternion q;           // [w, x, y, z]         quaternion container
-float euler[3];         // [psi, theta, phi]    Euler angle container
+VectorFloat gravity;    // [x, y, z]            gravity vector
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
 
 // Create different states for robot
 
@@ -406,8 +406,7 @@ void dmpDataReady() {
 }
 
 void readMPU6050() {
-  if (mpuInterrupt && mpu.getFIFOCount() < packetSize) {
-
+  if (mpuInterrupt && mpu.getFIFOCount() > packetSize) {
     // reset interrupt flag and get INT_STATUS byte
     mpuInterrupt = false;
     mpuIntStatus = mpu.getIntStatus();
@@ -435,13 +434,12 @@ void readMPU6050() {
       fifoCount -= packetSize;
       // display Euler angles in degrees
       mpu.dmpGetQuaternion(&q, fifoBuffer);
-      mpu.dmpGetEuler(euler, &q);
-      Serial.print("euler\t");
-      Serial.print(euler[0] * 180/M_PI);
-      Serial.print("\t");
-      Serial.print(euler[1] * 180/M_PI);
-      Serial.print("\t");
-      Serial.println(euler[2] * 180/M_PI);
+      mpu.dmpGetGravity(&gravity, &q);
+      mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+      ypr[0] = ypr[0] * 180/M_PI + 180;
+      ypr[1] = ypr[1] * 180/M_PI + 180;
+      ypr[2] = ypr[2] * 180/M_PI + 180;
+
     }
   }
 }
@@ -450,6 +448,7 @@ void setup()
 {
   Serial.begin(57600);
   Serial1.begin(115200);
+  
   pinMode(13,OUTPUT);
   pinMode(STBY,OUTPUT);
   pinMode(AIN2,OUTPUT);
@@ -470,16 +469,18 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(LEOA),leftEncoderEvent,CHANGE);
   attachInterrupt(digitalPinToInterrupt(REOA),rightEncoderEvent,CHANGE);
   
-  Wire.begin();
   Wire.setSDA(30);
-  Wire.setSCL(29);
+  Wire.setSCL(29);  
+  Wire.begin();
   Wire.setClock(400000);
+  
   mpu.initialize();
   pinMode(INTERRUPT_PIN, INPUT);
   // verify connection
   Serial1.println(F("Testing device connections..."));
   Serial1.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
   devStatus = mpu.dmpInitialize();
+  
   // supply your own gyro offsets here, scaled for min sensitivity
   mpu.setXGyroOffset(220);
   mpu.setYGyroOffset(76);
@@ -495,6 +496,7 @@ void setup()
   digitalWrite(13,HIGH);
   analogWrite(PWMA,SPEED);
   analogWrite(PWMB,SPEED);
+  
   delay(200);
   
 }
@@ -510,15 +512,15 @@ void loop()
     switch (xbeeIn) 
     {
       case '1':
-        Serial.write("Moving Forward");
+        Serial1.write("Moving Forward");
         robotState = MOVE_FORWARD;
         break;
       case '2':
-        Serial.write("Turning cw");
+        Serial1.write("Turning cw");
         robotState = ROTATE_CW;
         break;
       case '3':
-        Serial.write("Turning ccw");
+        Serial1.write("Turning ccw");
         robotState = ROTATE_CCW;
         break;
     } 
@@ -546,6 +548,7 @@ void loop()
   readMPU6050();
   
   //Debug output
-  Serial.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
+  //Serial1.printf("X: %f\n", ypr[0]);
+  //Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
   delay(20);
 }

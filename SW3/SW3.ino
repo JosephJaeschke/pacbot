@@ -31,6 +31,10 @@
 #define CIRC 3.14159265359*38.5 //from two years ago
 #define TICKSPROT 174 //ticks per rotation (from two years ago)
 
+#define F_THRESH 55
+#define L_THRESH 45
+#define R_THRESH 45
+
 bool debug = false;
 
 // IR Sensor Initalization
@@ -451,9 +455,9 @@ void setSpace(short row,short col)
   {
     sense();
   }
-  bool fwall=frontSense<55 ? true:false;
-  bool rwall=rightSense<45 ? true:false;
-  bool lwall=leftSense<45 ? true:false;
+  bool fwall=frontSense<F_THRESH ? true:false;
+  bool rwall=rightSense<R_THRESH ? true:false;
+  bool lwall=leftSense<L_THRESH ? true:false;
   Serial1.printf("fwall: %d\nRwall%d\nLwall%d\n", fwall, rwall, lwall);
   if(facing=='n')
   {

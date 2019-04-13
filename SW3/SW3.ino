@@ -182,7 +182,7 @@ void moveOne()
          if(debug) Serial1.printf("Forward\n");
 
         // Check if robot has traveled one blocks length, or is not in middle of a block based on front sensor
-        if (distance() < 15.8 && frontSense > 45) {
+        if (distance() < 16 && frontSense > 45) {
           // Calculate encoder and wall error
           short encError=-(leftCount - prevL) + (rightCount - prevR);
           double encDiff=enc.compute(encError);
@@ -191,11 +191,11 @@ void moveOne()
           
           // Check if there are valid walls to center on
           if (leftSense <45 && rightSense <45) {
-            Serial1.printf("Found two walls\n");
+            if(debug) Serial1.printf("Found two walls\n");
             double wallError = leftSense - rightSense;
             wallDiff = wall.compute(wallError);
           }else{
-            Serial1.printf("NO WALLS\n");
+            if(debug) Serial1.printf("NO WALLS\n");
           }
           
           int adjust = SPEED - encDiff - wallDiff;
@@ -203,9 +203,9 @@ void moveOne()
           analogWrite(PWMB, adjust);
         }
         //Traveled one block distance
-        else if (distance() >= 15.8) {
+        else if (distance() >= 16) {
           //Check if there is a wall in front of robot to center on
-          if (frontSense < 100) {
+          if (frontSense < 90) {
             forwardState = FORWARD_CENTER;
           } else {
             forwardState = FORWARD_FINALIZE;
@@ -219,19 +219,20 @@ void moveOne()
       break;
       
     case FORWARD_CENTER:
+      Serial1.printf("Stuck in forward Center\n");
       // While the robot is not in the center of box based on front wall, move forward
-      if (frontSense > 45) {
+      if (frontSense > 45 && frontSense < 90) {
         short encError=-(leftCount - prevL) + (rightCount - prevR);
         double encDiff=enc.compute(encError);
 
         double wallDiff = 0;
         // Check if there are valid walls to center on
         if (leftSense < 45 && rightSense < 45) {
-          Serial1.printf("Found two walls\n");
+          if(debug) Serial1.printf("Found two walls\n");
           double wallError = leftSense - rightSense;
           wallDiff = wall.compute(wallError);
         }else{
-          Serial1.printf("NO WALLS\n");
+          if(debug) Serial1.printf("NO WALLS\n");
         }
     
         int adjust = SPEED - encDiff - wallDiff;
@@ -451,36 +452,46 @@ void setSpace(short row,short col)
     sense();
   }
   bool fwall=frontSense<55 ? true:false;
-  bool rwall=leftSense<45 ? true:false;
-  bool lwall=rightSense<45 ? true:false;
+  bool rwall=rightSense<45 ? true:false;
+  bool lwall=leftSense<45 ? true:false;
+  Serial1.printf("fwall: %d\nRwall%d\nLwall%d\n", fwall, rwall, lwall);
   if(facing=='n')
   {
     grid[row][col].west=lwall;
     grid[row][col].north=fwall;
     grid[row][col].east=rwall;
+    curr.west=lwall;
+    curr.north=fwall;
+    curr.east=rwall;
   }
   else if(facing=='e')
   {
     grid[row][col].north=lwall;
     grid[row][col].east=fwall;
     grid[row][col].south=rwall;
+    curr.north=lwall;
+    curr.east=fwall;
+    curr.south=rwall;
   }
   else if(facing=='s')
   {
     grid[row][col].east=lwall;
     grid[row][col].south=fwall;
     grid[row][col].west=rwall;
+    curr.east=lwall;
+    curr.south=fwall;
+    curr.west=rwall;
   }
   else //facing=='w'
   {
     grid[row][col].south=lwall;
     grid[row][col].west=fwall;
     grid[row][col].north=rwall;
+    curr.south=lwall;
+    curr.west=fwall;
+    curr.north=rwall;
   }
 }
-
-
-
 
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
@@ -632,23 +643,38 @@ void loop()
         analogWrite(PWMA, 5);
         analogWrite(PWMB, 5);
         break;
+      case'8':
+        robotState = GO;
     } 
   }
   switch (robotState)
   {
     case MOVE_FORWARD:
+      Serial1.printf("Forward\n");
       moveOne();
       break;
     case ROTATE_CW_FORWARD:
+      Serial1.printf("CW\n");
       turnCW();
       break;
     case ROTATE_CCW_FORWARD:
+      Serial1.printf("CCW\n");
       turnCCW();
       break;
     case TURN_FORWARD:
+      Serial1.printf("Around\n");
       turnAround();
+      break;
     case IDLE:
+      Serial1.printf("X: %d Y: %d\n", curr.x, curr.y);
       floodFill();
+      Serial1.printf("newFace: %c\n", newFacing);
+      break;
+      
+    case GO:
+      //Serial1.printf("X: %d Y: %d\n", curr.x, curr.y);
+      //floodFill();
+      //Serial1.printf("newFace: %c\n", newFacing);
       break;
   }
   
@@ -656,7 +682,7 @@ void loop()
   sense();
 
   // Read MPU6050 Sensor
-  readMPU6050();
+  //readMPU6050();
   
   //Debug output
   //Serial1.printf("CurrAngle: %f\nPrevAngle: %f\nModDifference: %d\n\n", ypr[0], prevAngle, (int)(prevAngle + (360 - ypr[0]) + 5) % 360);

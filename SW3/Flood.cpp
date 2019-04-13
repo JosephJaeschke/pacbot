@@ -5,6 +5,7 @@ Node grid[16][16]={};
 Node curr={};
 
 char facing='e';
+char newFacing='e';
 
 states robotState = IDLE;
 
@@ -102,7 +103,7 @@ void transitionCell(char newFacing)
     //robot needs to face west
 		else //newFacing='w'
 		{
-			robotState=TURN_FORWARD;
+			robotState=ROTATE_CCW_FORWARD;
 		}
 
 	}
@@ -245,54 +246,70 @@ void floodFill()
 {
 	if((curr.x==7&&curr.y==7)||(curr.x==7&&curr.y==8)||(curr.x==8&&curr.y==7)||(curr.x==8&&curr.y==8))
 	{
+    //Serial1.printf("FINISHED\n");
 		robotState=IDLE;
     exit(0);
 	}
 	if(!curr.visited)
 	{
+    //Serial1.printf("Updating walls of current node\n");
 		setSpace(curr.x,curr.y); //marks all the walls at the current space
 		updateCell(curr);
 	}
 	//find min neighbor to move to
 	int minVal=257;
 	Node minNode={};
-	char newFacing;
+	//char newFacing;
 	if(validCell(curr.x-1,curr.y) && !curr.north) //up neighbor
 	{
+    //Serial1.printf("North cell is valid\n");
 		if(grid[curr.x-1][curr.y].value<minVal)
 		{
+      //Serial1.printf("North cell is possible next choice\n");
 			minVal=grid[curr.x-1][curr.y].value;
 			minNode=grid[curr.x-1][curr.y];
 			newFacing='n';
 		}
 	}
+  //Serial1.printf("is south valid: %d\n", validCell(curr.x+1,curr.y));
+  //Serial1.printf("is south wall there: %d\n", !curr.south);
+  
+
 	if(validCell(curr.x+1,curr.y) && !curr.south) //down neighbor
-	{
+	{    
+	  //Serial1.printf("south cell is valid\n");
 		if(grid[curr.x+1][curr.y].value<minVal)
 		{
+      //Serial1.printf("south cell is possible next choice\n");
 			minVal=grid[curr.x+1][curr.y].value;
 			minNode=grid[curr.x+1][curr.y];
 			newFacing='s';
 		}
 	}
 	if(validCell(curr.x,curr.y-1) && !curr.west) //west neighbor
-	{
+	{   
+	  //Serial1.printf("west cell is valid\n");
 		if(grid[curr.x][curr.y-1].value<minVal)
 		{
+      //Serial1.printf("west cell is possible next choice\n");
 			minVal=grid[curr.x][curr.y-1].value;
 			minNode=grid[curr.x][curr.y-1];
 			newFacing='w';
 		}
 	}
 	if(validCell(curr.x,curr.y+1) && !curr.east) //east neighbor
-	{
+	{   
+	  //Serial1.printf("east cell is valid\n");
 		if(grid[curr.x][curr.y+1].value<minVal)
 		{
+      //Serial1.printf("east cell is possible next choice\n");
 			minVal=grid[curr.x][curr.y+1].value;
 			minNode=grid[curr.x][curr.y+1];
 			newFacing='e';
 		}
 	}
+  //Serial1.printf("next state is: %c\n", newFacing);
+
 	//transition state
 	transitionCell(newFacing);
   facing=newFacing;

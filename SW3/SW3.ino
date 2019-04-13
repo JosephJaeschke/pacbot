@@ -6,7 +6,7 @@
 #include "SharpDistSensor.h"
 
 #include "PID.h"
-#include "Sensor.h"
+#include "Flood.h"
 #include "SoftwareSerial.h"
 
 #define STBY 20
@@ -74,16 +74,6 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 float prevAngle;
 
 // Create different states for robot
-
-enum states {
-  IDLE, //Waits for its next movement state
-  MOVE_FORWARD, //Move forward one block and switch back to idle
-  ROTATE_CW_FORWARD,  //Rotate 90 degrees Clockwise
-  ROTATE_CCW_FORWARD,  //Rotate 90 degrees Counter Clock Wise
-  TURN_FORWARD  //Rotate 180 degrees and go forward
-};
-
-enum states robotState = IDLE;
 
 enum moveForwardStates {
   FORWARD_INITALIZE,  //Set motor speeds and start moving
@@ -477,95 +467,42 @@ void sense()
   rightSense = (fr.getDist() + br.getDist())/2.0f;
 }
 
-/*
 void setSpace(short row,short col)
 {
-  sense();
-  bool fwall=false;
-  bool rwall=false;
-  bool lwall=false;
-  if(front.DEMA>front.thresholdd)
+  for(int i=0;i<5;i++)
   {
-    fwall=true;
+    sense();
   }
-  if(left.DEMA>left.thresholdd)
+  bool fwall=frontSense<55 ? true:false;
+  bool rwall=leftSense<45 ? true:false;
+  bool lwall=rightSense<45 ? true:false;
+  if(facing=='n')
   {
-    lwall=true;
+    grid[row][col].west=lwall;
+    grid[row][col].north=fwall;
+    grid[row][col].east=rwall;
   }
-  if(right.DEMA>right.thresholdd)
+  else if(facing=='e')
   {
-    rwall=true;
+    grid[row][col].north=lwall;
+    grid[row][col].east=fwall;
+    grid[row][col].south=rwall;
   }
-  if(fwall&&grid[row][col].visited==0)
+  else if(facing=='s')
   {
-    if(facing=='u')
-    {
-      grid[row][col].up=1;
-    }
-    else if(facing=='r')
-    {
-      grid[row][col].right=1;
-    }
-    else if(facing=='d')
-    {
-      grid[row][col].down=1;
-    }
-    else
-    {
-      grid[row][col].left=1;
-    }
+    grid[row][col].east=lwall;
+    grid[row][col].south=fwall;
+    grid[row][col].west=rwall;
   }
-  if(lwall&&grid[row][col].visited==0)
+  else //facing=='w'
   {
-    if(facing=='u')
-    {
-      grid[row][col].left=1;
-    }
-    else if(facing=='r')
-    {
-      grid[row][col].up=1;   
-    }
-    else if(facing=='d')
-    {
-      grid[row][col].right=1;
-    }
-    else
-    {
-      grid[row][col].down=1;
-    }
-  }
-  if(rwall&&grid[row][col].visited==0)
-  {
-    if(facing=='u')
-    {
-      grid[row][col].right=1;
-    }
-    else if(facing=='r')
-    {
-      grid[row][col].down=1;
-    }
-    else if(facing=='d')
-    {
-      grid[row][col].left=1;
-    }
-    else
-    {
-      grid[row][col].up=1;
-    }
-    delay(1000);
-  }
-  use_enc=true;
-  if(rwall&&lwall)
-  {
-   short error=left.DEMA-right.DEMA;
-   double diff=irPID.compute(error);
-   int adjust=SPEED-diff;
-   adjust=constrain(adjust,0,255);
-   analogWrite(PWMB,adjust);
-   use_enc=false;
+    grid[row][col].south=lwall;
+    grid[row][col].west=fwall;
+    grid[row][col].north=rwall;
   }
 }
-*/
+
+
 
 
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
@@ -666,7 +603,8 @@ void setup()
   digitalWrite(13,HIGH);
   analogWrite(PWMA,SPEED);
   analogWrite(PWMB,SPEED);
-  
+  initializeGrid();
+  curr=grid[0][0];
   delay(200);
   
 }
@@ -719,7 +657,7 @@ void loop()
         break;
     } 
   }
-  
+  floodFill();
   switch (robotState)
   {
     case MOVE_FORWARD:

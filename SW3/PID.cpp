@@ -17,7 +17,7 @@ float PID::compute(short err)
     float timeChg=(float)curr-(float)last;
     errSum+=err;
     float errD=(err-lastErr)/timeChg;
-    outPut=Kp*err+Ki*errSum*timeChg+Kd*errD;
+    outPut=Kp*err+Ki*errSum*timeChg*timeChg+Kd*errD;
     lastErr=err;
     last=curr;
     return outPut;

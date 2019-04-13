@@ -316,7 +316,7 @@ void turnCW()
       prevL=leftCount;
       
       rotateState = ROTATE_INITALIZE;
-      robotState = IDLE;
+      robotState = MOVE_FORWARD;
       delay(100);
       break;
   }
@@ -369,7 +369,7 @@ void turnCCW()
       prevL=leftCount;
       
       rotateState = ROTATE_INITALIZE;
-      robotState = IDLE;
+      robotState = MOVE_FORWARD;
       delay(100);
       break;
   }
@@ -422,7 +422,7 @@ void turnAround()
       prevL=leftCount;
       
       rotateState = ROTATE_INITALIZE;
-      robotState = IDLE;
+      robotState = MOVE_FORWARD;
       delay(100);
       break;
   }
@@ -436,32 +436,9 @@ void halt()
 float frontBuffer [20];
 int frontBuffLen = 20;
 float variance = 0;
+
 void sense()
 {
-  /*
-  // Calculate Variance of front sensor to deal with random vals
-  float sum = 0;
-  for (int i = 0; i < frontBuffLen - 1; i++) {
-    frontBuffer[i+1] = frontBuffer[i];
-    sum += frontBuffer[i];
-  }
-  frontBuffer[0] = front.DEMA;
-  sum += front.DEMA;
-
-  float mean = sum / frontBuffLen;
-
-  variance = 0;
-  for (int i = 0; i < frontBuffLen; i++) {
-    variance += pow((frontBuffer[i] - mean), 2);
-  }
-  variance = variance / frontBuffLen;
-
-  if (variance < 1.0f) {
-    frontSense = front.DEMA;
-  } else {
-    frontSense = 0;
-  }
-  */
   frontSense = front.getDist();
   leftSense = (fl.getDist() + bl.getDist())/2.0f;
   rightSense = (fr.getDist() + br.getDist())/2.0f;
@@ -657,7 +634,6 @@ void loop()
         break;
     } 
   }
-  floodFill();
   switch (robotState)
   {
     case MOVE_FORWARD:
@@ -672,6 +648,7 @@ void loop()
     case TURN_FORWARD:
       turnAround();
     case IDLE:
+      floodFill();
       break;
   }
   

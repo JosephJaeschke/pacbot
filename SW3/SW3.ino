@@ -3,6 +3,8 @@
 #include "helper_3dmath.h"
 #include "Wire.h"
 
+#include "SharpDistSensor.h"
+
 #include "PID.h"
 #include "Sensor.h"
 #include "SoftwareSerial.h"
@@ -29,22 +31,24 @@
 #define CIRC 3.14159265359*38.5 //from two years ago
 #define TICKSPROT 174 //ticks per rotation (from two years ago)
 
-bool debug = true;
+bool debug = false;
 
 // IR Sensor Initalization
-Sensor front(IRF);
-Sensor fr(IRFR);
-Sensor fl(IRFL);
-Sensor br(IRBR);
-Sensor bl(IRBL);
+const byte medianFilterWindowSize = 5;
+
+SharpDistSensor front(IRF, medianFilterWindowSize);
+SharpDistSensor fr(IRFR, medianFilterWindowSize);
+SharpDistSensor fl(IRFL, medianFilterWindowSize);
+SharpDistSensor br(IRBR, medianFilterWindowSize);
+SharpDistSensor bl(IRBL, medianFilterWindowSize);
 
 double frontSense = 0;
 double leftSense = 0;
 double rightSense = 0;
 
 //encoder and wall PID Initalization
-PID enc(3.8,0.0,0.0);
-PID wall(.5, 0, 0);
+PID enc(3.8, 0.007, 0.0);
+PID wall(.3, 0, 0);
 
 //encoder count variables
 volatile int leftCount=0, rightCount=0;
@@ -66,6 +70,7 @@ uint8_t fifoBuffer[64]; // FIFO storage buffer
 Quaternion q;           // [w, x, y, z]         quaternion container
 VectorFloat gravity;    // [x, y, z]            gravity vector
 float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+float prevAngle;
 
 // Create different states for robot
 
@@ -80,14 +85,22 @@ enum states {
 enum states robotState = IDLE;
 
 enum moveForwardStates {
-  INITALIZE,  //Set motor speeds and start moving
+  FORWARD_INITALIZE,  //Set motor speeds and start moving
   FORWARD,  //Move robot forward fixed distance or until it sees a wall
   FORWARD_CENTER, //After moving forward, if a wall is in front of the robot and it is too far backward, it moves to the center of the block
-  FINALIZE //Stop all motors and reset values
+  FORWARD_FINALIZE //Stop all motors and reset values
   
 };
 
-enum moveForwardStates forwardState = INITALIZE;
+enum moveForwardStates forwardState = FORWARD_INITALIZE;
+
+enum rotateStates {
+  ROTATE_INITALIZE, //Set initial angle
+  ROTATING, //Rotate until desired angle is reached
+  ROTATE_FINALIZE // Stop motors
+};
+
+enum rotateStates rotateState = ROTATE_INITALIZE;
 
 //Interrupt events for encoders
 void leftEncoderEvent() 
@@ -156,7 +169,7 @@ void moveOne()
 {
   switch (forwardState)
   {
-    case INITALIZE:
+    case FORWARD_INITALIZE:
         if(debug) Serial1.printf("Initalize\n");
         // Set motors to move forward
         digitalWrite(STBY,LOW);
@@ -165,7 +178,7 @@ void moveOne()
         digitalWrite(BIN1,HIGH);
         digitalWrite(BIN2,LOW);
         digitalWrite(STBY,HIGH);
-
+        analogWrite(PWMA, SPEED);
         forwardState = FORWARD;
         
       break;
@@ -175,7 +188,7 @@ void moveOne()
          if(debug) Serial1.printf("Forward\n");
 
         // Check if robot has traveled one blocks length, or is not in middle of a block based on front sensor
-        if (distance() < 15.8 && frontSense < 260) {
+        if (distance() < 15.8 && frontSense > 30) {
           // Calculate encoder and wall error
           short encError=-leftCount+rightCount;
           double encDiff=enc.compute(encError);
@@ -183,7 +196,7 @@ void moveOne()
           double wallDiff = 0;
           
           // Check if there are valid walls to center on
-          if (leftSense > 170 && rightSense > 170) {
+          if (leftSense <45 && rightSense <45) {
             double wallError = -leftSense + rightSense;
             wallDiff = wall.compute(wallError);
           }
@@ -195,32 +208,33 @@ void moveOne()
         //Traveled one block distance
         else if (distance() >= 15.8) {
           //Check if there is a wall in front of robot to center on
-          if (frontSense > 140) {
+          if (frontSense < 100) {
             forwardState = FORWARD_CENTER;
           } else {
-            forwardState = FINALIZE;
+            forwardState = FORWARD_FINALIZE;
           }
         }
         // If the robot stopped because of a wall, or there is no wall
         else {
-          forwardState = FINALIZE;
+          forwardState = FORWARD_FINALIZE;
         }
 
       break;
       
     case FORWARD_CENTER:
-       if(debug) Serial1.printf("Forward Center\n");
-
       // While the robot is not in the center of box based on front wall, move forward
-      if (frontSense < 260) {
+      if (frontSense > 30) {
         short encError=-leftCount+rightCount;
         double encDiff=enc.compute(encError);
 
         double wallDiff = 0;
         // Check if there are valid walls to center on
-        if (leftSense > 170 && rightSense > 170) {
+        if (leftSense < 45 && rightSense < 45) {
+          Serial1.printf("Found two walls\n");
           double wallError = -leftSense + rightSense;
           wallDiff = wall.compute(wallError);
+        }else{
+          Serial1.printf("NO WALLS\n");
         }
     
         int adjust = SPEED - encDiff - wallDiff;
@@ -228,11 +242,11 @@ void moveOne()
         adjust = constrain(adjust,0,100);
         analogWrite(PWMB, adjust);
       } else {
-        forwardState = FINALIZE;
+        forwardState = FORWARD_FINALIZE;
       }
       break;
 
-    case FINALIZE:
+    case FORWARD_FINALIZE:
       if(debug) Serial1.printf("Finalize\n");
 
       digitalWrite(STBY,LOW);
@@ -241,7 +255,7 @@ void moveOne()
 
       // Set states of robot since moving forward is done
       robotState = IDLE;
-      forwardState = INITALIZE;
+      forwardState = FORWARD_INITALIZE;
 
       //Delay commented out since I dont know what its for
       //delay(50);
@@ -253,74 +267,94 @@ void moveOne()
 
 void turnCW()
 {
-  digitalWrite(AIN1,LOW);
-  digitalWrite(AIN2,HIGH);
-  digitalWrite(BIN1,HIGH);
-  digitalWrite(BIN2,LOW);
-  analogWrite(PWMB,SPEED);
-  digitalWrite(STBY,HIGH);
-  rightCount=0;
-  leftCount=0;
-  while(rightCount < 88 && leftCount > -88)//double check
-  {
-    //Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
+  switch (rotateState) {
+    case ROTATE_INITALIZE:
+      digitalWrite(AIN1,LOW);
+      digitalWrite(AIN2,HIGH);
+      digitalWrite(BIN1,HIGH);
+      digitalWrite(BIN2,LOW);
+      analogWrite(PWMB,SPEED);
+      analogWrite(PWMA,SPEED);
+      digitalWrite(STBY,HIGH);
+      prevAngle = ypr[0];
+      rotateState = ROTATING;
+      break;
+      
+    case ROTATING:
+      if ( (int)(ypr[0] + (360 - prevAngle) + 5) % 360 >= 95) {
+        rotateState = ROTATE_FINALIZE;
+      }
+      break;
+
+    case ROTATE_FINALIZE:
+      digitalWrite(STBY,LOW);
+      rotateState = ROTATE_INITALIZE;
+      robotState = IDLE;
+      delay(100);
+      break;
   }
-  digitalWrite(STBY,LOW);
-  delay(100);
-  rightCount=0;
-  leftCount=0;
-  prevR=0;
-  prevL=0;
-  robotState = IDLE;
-  delay(100);
 }
 
 void turnCCW()
 {
-	digitalWrite(AIN1,HIGH);
-  digitalWrite(AIN2,LOW);
-  digitalWrite(BIN1,LOW);
-  digitalWrite(BIN2,HIGH);
-  analogWrite(PWMB,SPEED);
-  digitalWrite(STBY,HIGH);
-  rightCount=0;
-  leftCount=0;
-  while(rightCount > -93 &&leftCount < 93)//double check
-  {
-    //Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
+  switch (rotateState) {
+    case ROTATE_INITALIZE:
+      digitalWrite(AIN1,HIGH);
+      digitalWrite(AIN2,LOW);
+      digitalWrite(BIN1,LOW);
+      digitalWrite(BIN2,HIGH);
+      analogWrite(PWMB,SPEED);
+      analogWrite(PWMA,SPEED);
+      digitalWrite(STBY,HIGH);
+      prevAngle = ypr[0];
+      rotateState = ROTATING;
+      break;
+      
+    case ROTATING:
+      if ( (int)(prevAngle + (360 - ypr[0]) + 5) % 360 >= 95) {
+        rotateState = ROTATE_FINALIZE;
+      }
+      break;
+
+    case ROTATE_FINALIZE:
+      digitalWrite(STBY,LOW);
+      rotateState = ROTATE_INITALIZE;
+      robotState = IDLE;
+      delay(100);
+      break;
   }
-  digitalWrite(STBY,LOW);
-  delay(100);
-  rightCount=0;
-  leftCount=0;
-  prevR=0;
-  prevL=0;
-  robotState = IDLE;
-  delay(100);
 }
 
 void turnAround()
 {
-  digitalWrite(AIN1,HIGH);
-  digitalWrite(AIN2,LOW);
-  digitalWrite(BIN1,LOW);
-  digitalWrite(BIN2,HIGH);
-  analogWrite(PWMB,SPEED);
-  digitalWrite(STBY,HIGH);
-  rightCount=0;
-  leftCount=0;
-  while(rightCount > -186 &&leftCount < 186)//double check
-  {
-    //Serial1.printf("Left Enc: %d Right Enc: %d \n", leftCount, rightCount);
+  switch (rotateState) {
+    case ROTATE_INITALIZE:
+      digitalWrite(AIN1,HIGH);
+      digitalWrite(AIN2,LOW);
+      digitalWrite(BIN1,LOW);
+      digitalWrite(BIN2,HIGH);
+      analogWrite(PWMB,SPEED);
+      analogWrite(PWMA,SPEED);
+      digitalWrite(STBY,HIGH);
+      prevAngle = ypr[0];
+      rotateState = ROTATING;
+      break;
+      
+    case ROTATING:
+      // Calculate the rotation from starting point. Added 5 to
+      // make sure roatation does not loop around to 360
+      if ( (int)(prevAngle + (360 - ypr[0]) + 5) % 360 >= 185) {
+        rotateState = ROTATE_FINALIZE;
+      }
+      break;
+
+    case ROTATE_FINALIZE:
+      digitalWrite(STBY,LOW);
+      rotateState = ROTATE_INITALIZE;
+      robotState = IDLE;
+      delay(100);
+      break;
   }
-  digitalWrite(STBY,LOW);
-  delay(100);
-  rightCount=0;
-  leftCount=0;
-  prevR=0;
-  prevL=0;
-  robotState = IDLE;
-  delay(100);
 }
 
 void halt()
@@ -328,19 +362,38 @@ void halt()
 	digitalWrite(STBY,LOW);
 }
 
+float frontBuffer [20];
+int frontBuffLen = 20;
+float variance = 0;
 void sense()
 {
-  for(int i=0;i<5;i++)
-  {
-    front.filter(analogRead(front.pin));
-    fr.filter(analogRead(fr.pin));
-    fl.filter(analogRead(fl.pin));
-    br.filter(analogRead(br.pin));
-    bl.filter(analogRead(bl.pin));
+  /*
+  // Calculate Variance of front sensor to deal with random vals
+  float sum = 0;
+  for (int i = 0; i < frontBuffLen - 1; i++) {
+    frontBuffer[i+1] = frontBuffer[i];
+    sum += frontBuffer[i];
   }
-  frontSense = front.DEMA;
-  leftSense = (fl.DEMA+bl.DEMA)/2.0f;
-  rightSense = (fr.DEMA + br.DEMA)/2.0f;
+  frontBuffer[0] = front.DEMA;
+  sum += front.DEMA;
+
+  float mean = sum / frontBuffLen;
+
+  variance = 0;
+  for (int i = 0; i < frontBuffLen; i++) {
+    variance += pow((frontBuffer[i] - mean), 2);
+  }
+  variance = variance / frontBuffLen;
+
+  if (variance < 1.0f) {
+    frontSense = front.DEMA;
+  } else {
+    frontSense = 0;
+  }
+  */
+  frontSense = front.getDist();
+  leftSense = (fl.getDist() + bl.getDist())/2.0f;
+  rightSense = (fr.getDist() + br.getDist())/2.0f;
 }
 
 /*
@@ -495,11 +548,12 @@ void setup()
   pinMode(REOB,INPUT);
   pinMode(PWMA,OUTPUT);
   pinMode(PWMB,OUTPUT);
-  pinMode(IRBL,INPUT);
-  pinMode(IRF,INPUT);
-  pinMode(IRBR,INPUT);
-  pinMode(IRFR,INPUT);
-  pinMode(IRFL,INPUT);
+  front.setModel(SharpDistSensor::GP2Y0A51SK0F_5V_DS);
+  fr.setModel(SharpDistSensor::GP2Y0A51SK0F_5V_DS);
+  fl.setModel(SharpDistSensor::GP2Y0A51SK0F_5V_DS);
+  br.setModel(SharpDistSensor::GP2Y0A51SK0F_5V_DS);
+  bl.setModel(SharpDistSensor::GP2Y0A51SK0F_5V_DS);
+
   attachInterrupt(digitalPinToInterrupt(LEOA),leftEncoderEvent,CHANGE);
   attachInterrupt(digitalPinToInterrupt(REOA),rightEncoderEvent,CHANGE);
   
@@ -561,6 +615,11 @@ void loop()
         Serial1.write("Rotate 180 and forward");
         robotState = TURN_FORWARD;
         break;
+      case'5':
+        Serial1.printf("CurrAngle: %f\nPrevAngle: %f\nModDifference: %d\n\n", ypr[0], prevAngle, (int)(prevAngle + (360 - ypr[0]) + 5) % 360);
+        Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
+        Serial1.printf("VARIANCE: %f\n\n", variance);
+        break;
     } 
   }
   
@@ -588,7 +647,8 @@ void loop()
   readMPU6050();
   
   //Debug output
-  //Serial1.printf("X: %f\n", ypr[0]);
+  //Serial1.printf("CurrAngle: %f\nPrevAngle: %f\nModDifference: %d\n\n", ypr[0], prevAngle, (int)(prevAngle + (360 - ypr[0]) + 5) % 360);
   //Serial1.printf("Front: %f\nLeft: %f\nRight: %f\n", frontSense, leftSense, rightSense);
+  //Serial1.printf("VARIANCE: %f\n\n", variance);
   delay(20);
 }
